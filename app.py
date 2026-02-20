@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import pickle
 import plotly.express as px
-import base64
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Heart Disease Predictor", layout="wide")
@@ -28,6 +27,12 @@ except FileNotFoundError:
     st.error("Model files not found. Please upload them to the directory.")
     st.stop()
 
+# Define the EXACT 11 features the model was trained on
+feature_names = [
+    'Age', 'Sex', 'ChestPainType', 'RestingBP', 'Cholesterol', 
+    'FastingBS', 'RestingECG', 'MaxHR', 'ExerciseAngina', 'Oldpeak', 'ST_Slope'
+]
+
 # --- TABS ---
 tab1, tab2, tab3 = st.tabs(["Predict", "Bulk Predict", "Model Information"])
 
@@ -40,38 +45,34 @@ with tab1:
     with col1:
         age = st.number_input("Age", min_value=1, max_value=150, value=50)
         sex = st.selectbox("Gender", ["Male", "Female"])
-        cp = st.selectbox("Chest Pain Type", ["Typical Angina", "Atypical Angina", "Non-anginal Pain", "Asymptomatic"])
+        cp = st.selectbox("Chest Pain Type", ["Atypical Angina (ATA)", "Non-Anginal Pain (NAP)", "Asymptomatic (ASY)", "Typical Angina (TA)"])
         trestbps = st.number_input("Resting Blood Pressure (mm Hg)", min_value=50, max_value=250, value=120)
-        chol = st.number_input("Serum Cholesterol (mg/dl)", min_value=100, max_value=600, value=200)
         
     with col2:
+        chol = st.number_input("Serum Cholesterol (mg/dl)", min_value=0, max_value=600, value=200)
         fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", ["False", "True"])
-        restecg = st.selectbox("Resting ECG Results", ["Normal", "ST-T Wave Abnormality", "Left Ventricular Hypertrophy"])
+        restecg = st.selectbox("Resting ECG Results", ["Normal", "ST-T Wave Abnormality (ST)", "Left Ventricular Hypertrophy (LVH)"])
         thalach = st.number_input("Maximum Heart Rate Achieved", min_value=50, max_value=250, value=150)
-        exang = st.selectbox("Exercise Induced Angina", ["No", "Yes"])
-        oldpeak = st.number_input("ST Depression (Oldpeak)", min_value=0.0, max_value=10.0, value=0.0, step=0.1)
         
     with col3:
+        exang = st.selectbox("Exercise Induced Angina", ["No", "Yes"])
+        oldpeak = st.number_input("ST Depression (Oldpeak)", min_value=-5.0, max_value=10.0, value=0.0, step=0.1)
         slope = st.selectbox("Slope of the Peak ST Segment", ["Upsloping", "Flat", "Downsloping"])
-        ca = st.number_input("Number of Major Vessels (0-3)", min_value=0, max_value=4, value=0)
-        thal = st.selectbox("Thalassemia", ["Normal", "Fixed Defect", "Reversable Defect"])
 
     if st.button("Submit"):
-        sex_val = 1 if sex == "Male" else 0
-        cp_dict = {"Typical Angina": 0, "Atypical Angina": 1, "Non-anginal Pain": 2, "Asymptomatic": 3}
+        # Map values properly (matching notebook encoding)
+        sex_val = 0 if sex == "Male" else 1
+        cp_dict = {"Atypical Angina (ATA)": 0, "Non-Anginal Pain (NAP)": 1, "Asymptomatic (ASY)": 2, "Typical Angina (TA)": 3}
         fbs_val = 1 if fbs == "True" else 0
-        restecg_dict = {"Normal": 0, "ST-T Wave Abnormality": 1, "Left Ventricular Hypertrophy": 2}
+        restecg_dict = {"Normal": 0, "ST-T Wave Abnormality (ST)": 1, "Left Ventricular Hypertrophy (LVH)": 2}
         exang_val = 1 if exang == "Yes" else 0
         slope_dict = {"Upsloping": 0, "Flat": 1, "Downsloping": 2}
-        thal_dict = {"Normal": 1, "Fixed Defect": 2, "Reversable Defect": 3}
         
-        input_data = np.array([[
+        # Build strict DataFrame with only the 11 variables to prevent 13-feature ValueError
+        input_data = pd.DataFrame([[
             age, sex_val, cp_dict[cp], trestbps, chol, fbs_val, 
-            restecg_dict[restecg], thalach, exang_val, oldpeak, 
-            slope_dict[slope], ca, thal_dict[thal]
-        ]])
-        
-        # NOTE: Removed the scaler transformation step
+            restecg_dict[restecg], thalach, exang_val, oldpeak, slope_dict[slope]
+        ]], columns=feature_names)
         
         st.subheader("Results & Model Thinking")
         models = {
@@ -85,13 +86,11 @@ with tab1:
         for i, (name, model) in enumerate(models.items()):
             pred = model.predict(input_data)[0]
             
-            # Get prediction probabilities for "Model Thinking"
             try:
                 probabilities = model.predict_proba(input_data)[0]
                 prob_no_disease = probabilities[0]
                 prob_disease = probabilities[1]
             except AttributeError:
-                # Fallback if model doesn't support predict_proba
                 prob_disease = 1.0 if pred == 1 else 0.0
                 prob_no_disease = 1.0 - prob_disease
 
@@ -104,7 +103,6 @@ with tab1:
                 st.markdown(f"<h5 style='color: {color};'>{result_text}</h5>", unsafe_allow_html=True)
                 st.write(f"**Model Confidence:** {confidence * 100:.1f}%")
                 
-                # Show probability distribution
                 st.caption("Model Probabilities:")
                 st.progress(float(prob_disease), text=f"Disease: {prob_disease*100:.1f}%")
                 st.progress(float(prob_no_disease), text=f"No Disease: {prob_no_disease*100:.1f}%")
@@ -115,8 +113,8 @@ with tab2:
     st.markdown("""
     **Instructions:**
     1. No NaN values are allowed.
-    2. Total 13 features must be present in exactly this order: `age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal`.
-    3. Categorical variables must be correctly encoded numerically.
+    2. Upload a CSV containing at least these 11 features: `Age`, `Sex`, `ChestPainType`, `RestingBP`, `Cholesterol`, `FastingBS`, `RestingECG`, `MaxHR`, `ExerciseAngina`, `Oldpeak`, `ST_Slope`.
+    3. Categorical variables must be numerically encoded identical to the model training.
     """)
     
     uploaded_file = st.file_uploader("Upload CSV File (Max 200MB)", type=["csv"])
@@ -124,15 +122,23 @@ with tab2:
     if uploaded_file is not None:
         try:
             input_df = pd.read_csv(uploaded_file)
-            st.write("### Data Preview")
-            st.dataframe(input_df.head())
             
-            # NOTE: Removed the scaler transformation step
-            predictions = xgb_model.predict(input_df) 
-            input_df['Prediction_XGB'] = predictions
+            # Select only the 11 required columns (drops extra features if present)
+            try:
+                features_to_predict = input_df[feature_names]
+            except KeyError as e:
+                st.error(f"Missing required columns in CSV. Details: {e}")
+                st.stop()
+            
+            st.write("### Data Preview")
+            st.dataframe(input_df.head(), width='stretch')
+            
+            predictions = xgb_model.predict(features_to_predict) 
+            input_df['Prediction'] = predictions
+            input_df['Result'] = input_df['Prediction'].map({0: 'No Disease', 1: 'Disease Detected'})
             
             st.write("### Prediction Results")
-            st.dataframe(input_df)
+            st.dataframe(input_df, width='stretch')
             
             csv = input_df.to_csv(index=False).encode('utf-8')
             st.download_button(
@@ -142,17 +148,17 @@ with tab2:
                 mime='text/csv',
             )
         except Exception as e:
-            st.warning(f"Please make sure the uploaded CSV file has correct columns and data format. Error: {e}")
+            st.error(f"Error processing the file. Make sure columns match the 11 trained features strictly. Error details: {e}")
 
 # --- TAB 3: MODEL INFORMATION ---
 with tab3:
     st.header("Model Performance Information")
     
     model_data = {
-        'Decision Tree': 80.9,
-        'Logistic Regression': 85.8,
-        'Random Forest': 85.9,
-        'XGBoost': 86.4
+        'Decision Tree': 80.97,
+        'Logistic Regression': 85.86,
+        'Random Forest': 85.86,
+        'XGBoost': 86.41
     }
     
     df_acc = pd.DataFrame({
@@ -172,4 +178,4 @@ with tab3:
     fig.update_layout(yaxis_title="Accuracy (%)", xaxis_title="Models")
     fig.update_traces(texttemplate='%{text}%', textposition='outside')
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
